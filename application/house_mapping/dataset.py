@@ -175,7 +175,7 @@ class GDALDataset(object):
         if len(bounds) != 0:
             all_bounds.append(bounds)
 
-        return all_bounds
+        return all_bounds, (size_row, size_column, buffer_row, buffer_column)
 
     def get_data(self, bound):
         row = bound[0]
