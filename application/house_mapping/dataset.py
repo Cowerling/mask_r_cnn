@@ -1,7 +1,7 @@
 import os
 import numpy as np
 import rasterio
-from  rasterio.windows import Window
+from rasterio.windows import Window
 import math
 
 from pycocotools.coco import COCO
