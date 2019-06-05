@@ -1,6 +1,16 @@
 import rasterio
 from rasterio.windows import Window
 import math
+import psycopg2
+import ogr
+import json
+from rasterio import features
+import numpy as np
+import tqdm
+
+import matplotlib.pyplot as plt
+
+from mrcnn import utils
 
 
 class GDALDataset(object):
@@ -41,11 +51,11 @@ class GDALDataset(object):
             if column_min < 0:
                 column_min = 0
 
-            if row_max > self.row_count:
-                row_max = self.row_count
+            if row_max >= self.row_count:
+                row_max = self.row_count - 1
 
-            if column_max > self.column_count:
-                column_max = self.column_count
+            if column_max >= self.column_count:
+                column_max = self.column_count - 1
 
         all_bounds = []
         bounds = []
@@ -93,3 +103,135 @@ class GDALDataset(object):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.data_source.close()
+
+
+class SpatialDataset(utils.Dataset):
+
+    def __init__(self):
+        super(self.__class__, self).__init__()
+
+        self.data_references = []
+
+    def load_data(self, source, rs_image_path, database, user, password, host, port, mask_table, bound_table):
+        with GDALDataset(rs_image_path) as dataset:
+            connection = psycopg2.connect(database=database,
+                                          user=user,
+                                          password=password,
+                                          host=host,
+                                          port=port)
+
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT DISTINCT class FROM ' + mask_table)
+                class_names = cursor.fetchall()
+
+                for class_name in class_names:
+                    class_name = class_name[0]
+                    if class_name not in [single_class_info['name'] for single_class_info in self.class_info]:
+                        self.add_class(source, len(self.class_info), class_name)
+
+                cursor.execute('SELECT id, ST_AsText(geom) FROM ' + bound_table)
+                bounds = cursor.fetchall()
+
+                for bound in tqdm.tqdm(bounds):
+                    bound_id = bound[0]
+                    bound_envelop = ogr.CreateGeometryFromWkt(bound[1]).GetEnvelope()
+
+                    row_min, column_min = dataset.data_source.index(bound_envelop[0], bound_envelop[3])
+                    row_max, column_max = dataset.data_source.index(bound_envelop[1], bound_envelop[2])
+
+                    row_min = 0 if row_min < 0 else row_min
+                    column_min = 0 if column_min < 0 else column_min
+                    row_max = dataset.row_count - 1 if row_max >= dataset.row_count else row_max
+                    column_max = dataset.column_count - 1 if column_max >= dataset.column_count else column_max
+
+                    row = row_min
+                    column = column_min
+                    size_row = row_max - row_min + 1
+                    size_column = column_max - column_min + 1
+
+                    transform = dataset.get_transform(row, column)
+
+                    self.add_image(source,
+                                   image_id='{}-{}-{}-{}'.format(host, database, bound_table, bound_id),
+                                   path=None,
+                                   reference_id=len(self.data_references),
+                                   bound=(row, column, size_row, size_column),
+                                   transform=transform)
+
+            self.data_references.append({
+                'path': rs_image_path,
+                'connection': connection,
+                'mask_table': mask_table
+            })
+
+    def load_image(self, image_id):
+        image_info = self.image_info[image_id]
+
+        reference_id = image_info['reference_id']
+        bound = image_info['bound']
+
+        rs_image_path = self.data_references[reference_id]['path']
+
+        with GDALDataset(rs_image_path) as dataset:
+            image = dataset.get_data(bound)
+
+        return image
+
+    def image_reference(self, image_id):
+        image_info = self.image_info[image_id]
+        reference_id = image_info['reference_id']
+
+        return '{}.{}.{}'.format(image_id, self.data_references[reference_id]['path'], image_info['bound'])
+
+    def load_mask(self, image_id):
+        image_info = self.image_info[image_id]
+
+        inner_id = image_info['id']
+        bound = image_info['bound']
+        transform = image_info['transform']
+
+        reference_id = image_info['reference_id']
+        data_reference = self.data_references[reference_id]
+        connection = data_reference['connection']
+        mask_table = data_reference['mask_table']
+
+        bound_id = inner_id.split('-')[-1]
+
+        masks = []
+        mask_classes = []
+
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT ST_AsText(geom), class FROM {} WHERE bound = {}'.format(mask_table, bound_id))
+            spatial_masks = cursor.fetchall()
+
+            for spatial_mask_with_class in spatial_masks:
+                spatial_mask = ogr.CreateGeometryFromWkt(spatial_mask_with_class[0])
+                mask = features.geometry_mask(geometries=[json.loads(spatial_mask.ExportToJson())],
+                                              out_shape=(bound[2], bound[3]),
+                                              transform=transform,
+                                              all_touched=True,
+                                              invert=True)
+
+                masks.append(mask)
+
+                mask_class = spatial_mask_with_class[1]
+                mask_classes.append(mask_class)
+
+        masks = np.array(masks)
+        masks = masks.transpose(1, 2, 0)
+
+        class_ids = np.array([self.class_names.index(mask_class) for mask_class in mask_classes])
+        class_ids = class_ids.astype(np.int32)
+
+        return masks, class_ids
+
+    def close(self):
+        for data_reference in self.data_references:
+            connection = data_reference['connection']
+            connection.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
