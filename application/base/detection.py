@@ -16,7 +16,7 @@ from application.base.dataset import GDALDataset
 
 def get_masks(block_id, mask_list, cursor, mask_table):
     cursor.execute('SELECT '
-                   'ST_AsText(mask), ST_AsText(box), id ' +
+                   'ST_AsText(mask), ST_AsText(box), id '
                    'FROM ' + mask_table + ' WHERE block = %s', [block_id])
     _mask_list = cursor.fetchall()
 
@@ -96,7 +96,34 @@ def detect(rs_image_path, class_names,
                                       port=port)
         cursor = connection.cursor()
 
+        # create mask and block table in database
+        print('create mask table: {}'.format(mask_table))
+        cursor.execute('CREATE TABLE IF NOT EXISTS {} '
+                       '('
+                       'id bigint NOT NULL PRIMARY KEY, '
+                       'mask geometry(MultiPolygon, {}), '
+                       'class varchar(30), '
+                       'score numeric, '
+                       'box geometry(MultiPolygon, {}), '
+                       'block varchar(50), '
+                       'expand integer'
+                       ')'.format(mask_table, dataset.epsg, dataset.epsg))
+        cursor.execute('CREATE INDEX IF NOT EXISTS sidx_{}_mask ON {} USING GIST (mask)'.
+                       format(mask_table, mask_table))
+
+        print('create block table: {}'.format(block_table))
+        cursor.execute('CREATE TABLE IF NOT EXISTS {} '
+                       '('
+                       'id varchar(50) NOT NULL PRIMARY KEY, '
+                       'geom geometry(MultiPolygon, {}), '
+                       ')'.format(block_table, dataset.epsg))
+        cursor.execute('CREATE INDEX IF NOT EXISTS sidx_{}_geom ON {} USING GIST (geom)'.
+                       format(block_table, block_table))
+
+        connection.commit()
+
         if reset:
+            print('create clear table: {}, {}'.format(mask_table, block_table))
             cursor.execute('DELETE FROM ' + mask_table)
             cursor.execute('DELETE FROM ' + block_table)
             connection.commit()
