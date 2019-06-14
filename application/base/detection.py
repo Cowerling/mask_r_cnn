@@ -115,7 +115,7 @@ def detect(rs_image_path, class_names,
         cursor.execute('CREATE TABLE IF NOT EXISTS {} '
                        '('
                        'id varchar(50) NOT NULL PRIMARY KEY, '
-                       'geom geometry(MultiPolygon, {}), '
+                       'geom geometry(MultiPolygon, {})'
                        ')'.format(block_table, dataset.epsg))
         cursor.execute('CREATE INDEX IF NOT EXISTS sidx_{}_geom ON {} USING GIST (geom)'.
                        format(block_table, block_table))
@@ -123,7 +123,7 @@ def detect(rs_image_path, class_names,
         connection.commit()
 
         if reset:
-            print('create clear table: {}, {}'.format(mask_table, block_table))
+            print('clear table: {}, {}'.format(mask_table, block_table))
             cursor.execute('DELETE FROM ' + mask_table)
             cursor.execute('DELETE FROM ' + block_table)
             connection.commit()
