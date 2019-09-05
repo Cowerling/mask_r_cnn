@@ -36,7 +36,8 @@ train_sources = [{
     'host': '10.6.72.213',
     'port': 5432,
     'mask_table': 'sample_mask',
-    'bound_table': 'sample_bound'
+    'bound_table': 'sample_bound',
+    'condition': None
 }]
 
 validation_sources = [{
@@ -47,7 +48,8 @@ validation_sources = [{
     'host': '10.6.72.213',
     'port': 5432,
     'mask_table': 'sample_mask_val',
-    'bound_table': 'sample_bound_val'
+    'bound_table': 'sample_bound_val',
+    'condition': None
 }]
 
 train(source='house', class_names=['house'],

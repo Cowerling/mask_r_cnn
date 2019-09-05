@@ -59,7 +59,9 @@ def detect(rs_image_path, class_names,
            weight_path, log_dir,
            database, user, password, host, port, mask_table, block_table,
            bound_size, bound_buffer,
-           reset=True, images_per_gpu=5, gpu_count=1, show_mask=False):
+           reset=True, images_per_gpu=5, gpu_count=1,
+           mean_pixel_values=None,
+           show_mask=False):
 
     class InferenceConfig(config.Config):
         NAME = os.path.splitext(os.path.basename(rs_image_path))[0]
@@ -71,6 +73,9 @@ def detect(rs_image_path, class_names,
 
         IMAGE_MAX_DIM = bound_size[0]
         IMAGE_MIN_DIM = bound_size[1]
+
+        IMAGE_CHANNEL_COUNT = config.Config.IMAGE_CHANNEL_COUNT if mean_pixel_values is None else len(mean_pixel_values)
+        MEAN_PIXEL = config.Config.MEAN_PIXEL if mean_pixel_values is None else np.array(mean_pixel_values)
 
     inference_config = InferenceConfig()
 

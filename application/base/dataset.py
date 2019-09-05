@@ -108,7 +108,7 @@ class SpatialDataset(utils.Dataset):
         for class_name in class_names:
             self.add_class(source, len(self.class_info), class_name)
 
-    def load_data(self, rs_image_path, database, user, password, host, port, mask_table, bound_table):
+    def load_data(self, rs_image_path, database, user, password, host, port, mask_table, bound_table, condition):
         connection_string = 'dbname={} user={} password={} host={} port={}'.format(database,
                                                                                    user,
                                                                                    password,
@@ -124,7 +124,8 @@ class SpatialDataset(utils.Dataset):
         with GDALDataset(rs_image_path) as dataset:
             with psycopg2.connect(connection_string) as connection:
                 with connection.cursor() as cursor:
-                    cursor.execute('SELECT id, ST_AsText(geom) FROM ' + bound_table)
+                    cursor.execute('SELECT id, ST_AsText(geom) FROM ' + bound_table +
+                                   ('' if condition is None else ' WHERE ' + condition))
                     bounds = cursor.fetchall()
 
                     for bound in tqdm.tqdm(bounds):

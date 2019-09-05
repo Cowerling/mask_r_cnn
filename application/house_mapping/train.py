@@ -23,8 +23,8 @@ class TrainConfig(config.Config):
 
 config = TrainConfig()
 
-model = models.MaskRCNN(mode='training', config=config, model_dir='/media/cowerling/新加卷1/weight_log_2')
-model.load_weights('./weight/pretrained_weights.h5', by_name=True)
+model = models.MaskRCNN(mode='training', config=config, model_dir='/home/cowerling/house_mapping/log')
+model.load_weights('/home/cowerling/house_mapping/weight/mask_rcnn_house-mapping_0036.h5', by_name=True)
 
 dataset_train = HouseDataset()
 dataset_train.load_dataset('./image/train/annotation-small.json')
@@ -34,13 +34,11 @@ dataset_validation = HouseDataset()
 dataset_validation.load_dataset('./image/val/annotation-small.json')
 dataset_validation.prepare()
 
-print('Training heads')
-model.train(dataset_train, dataset_validation, learning_rate=config.LEARNING_RATE, epochs=40, layers='heads')
+# print('Training heads')
+# model.train(dataset_train, dataset_validation, learning_rate=config.LEARNING_RATE, epochs=33, layers='heads')
 
-'''
-print('Fine tune Resnet stage 4 and up')
-model.train(dataset_train, dataset_validation, learning_rate=config.LEARNING_RATE, epochs=120, layers='4+')
+# print('Fine tune Resnet stage 4 and up')
+# model.train(dataset_train, dataset_validation, learning_rate=config.LEARNING_RATE, epochs=120, layers='4+')
 
 print('Fine tune all layers')
-model.train(dataset_train, dataset_validation, learning_rate=config.LEARNING_RATE / 10, epochs=160, layers='all')
-'''
+model.train(dataset_train, dataset_validation, learning_rate=config.LEARNING_RATE / 20, epochs=160, layers='all')
