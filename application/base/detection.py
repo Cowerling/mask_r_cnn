@@ -3,10 +3,12 @@ import tqdm
 import numpy as np
 import psycopg2
 import ogr
+import gdal
 from rasterio import features
 import json
 from termcolor import colored
 import matplotlib.pyplot as plt
+import keras
 
 from mrcnn import config
 from mrcnn import models
@@ -14,7 +16,7 @@ from mrcnn import models
 from application.base.dataset import GDALDataset
 
 
-def get_masks(block_id, mask_list, cursor, mask_table):
+def get_masks(block_id, mask_list, cursor, mask_table, tips):
     cursor.execute('SELECT '
                    'ST_AsText(mask), ST_AsText(box), id '
                    'FROM ' + mask_table + ' WHERE block = %s', [block_id])
@@ -25,7 +27,7 @@ def get_masks(block_id, mask_list, cursor, mask_table):
         single_box = ogr.CreateGeometryFromWkt(_mask[1])
         single_id = _mask[2]
 
-        single_mask = ensure_geometry(single_mask)
+        single_mask = ensure_geometry(single_mask, tips)
 
         if single_mask.IsValid():
             mask_list.append((single_mask, single_box, single_id))
@@ -47,9 +49,10 @@ def envelope_to_box(envelope):
     return ogr.CreateGeometryFromWkt(box_wkt)
 
 
-def ensure_geometry(geometry):
+def ensure_geometry(geometry, tips):
     if not geometry.IsValid():
-        print(colored('use buffer to fix geometry', 'blue'))
+        if tips:
+            print(colored('use buffer to fix geometry', 'blue'))
         geometry = geometry.Buffer(0)
 
     return geometry
@@ -58,10 +61,10 @@ def ensure_geometry(geometry):
 def detect(rs_image_path, class_names,
            weight_path, log_dir,
            database, user, password, host, port, mask_table, block_table,
-           bound_size, bound_buffer,
+           bound_size, bound_buffer, extent=None,
            reset=True, images_per_gpu=5, gpu_count=1,
            mean_pixel_values=None,
-           show_mask=False):
+           show_mask=False, tips=True):
 
     class InferenceConfig(config.Config):
         NAME = os.path.splitext(os.path.basename(rs_image_path))[0]
@@ -79,13 +82,16 @@ def detect(rs_image_path, class_names,
 
     inference_config = InferenceConfig()
 
+    keras.backend.clear_session()
+
     model = models.MaskRCNN(mode='inference', model_dir=log_dir, config=inference_config)
     model.load_weights(weight_path, by_name=True)
 
     with GDALDataset(rs_image_path) as dataset:
         bounds, bound_size_buffer = dataset.generate_bounds(size=bound_size,
                                                             buffer=bound_buffer,
-                                                            batch_size=inference_config.BATCH_SIZE)
+                                                            batch_size=inference_config.BATCH_SIZE,
+                                                            extent=extent)
         bound_offset_row = bound_size_buffer[0] - bound_size_buffer[2]
         bound_offset_column = bound_size_buffer[1] - bound_size_buffer[3]
         print('bounds count: {}, size: ({} {}), buffer: ({} {})'.format(len(bounds),
@@ -102,7 +108,8 @@ def detect(rs_image_path, class_names,
         cursor = connection.cursor()
 
         # create mask and block table in database
-        print('create mask table: {}'.format(mask_table))
+        if tips:
+            print('create mask table: {} if not exist'.format(mask_table))
         cursor.execute('CREATE TABLE IF NOT EXISTS {} '
                        '('
                        'id bigint NOT NULL PRIMARY KEY, '
@@ -116,7 +123,8 @@ def detect(rs_image_path, class_names,
         cursor.execute('CREATE INDEX IF NOT EXISTS sidx_{}_mask ON {} USING GIST (mask)'.
                        format(mask_table, mask_table))
 
-        print('create block table: {}'.format(block_table))
+        if tips:
+            print('create block table: {} if not exist'.format(block_table))
         cursor.execute('CREATE TABLE IF NOT EXISTS {} '
                        '('
                        'id varchar(50) NOT NULL PRIMARY KEY, '
@@ -128,16 +136,23 @@ def detect(rs_image_path, class_names,
         connection.commit()
 
         if reset:
-            print('clear table: {}, {}'.format(mask_table, block_table))
+            if tips:
+                print('clear table: {}, {}'.format(mask_table, block_table))
             cursor.execute('DELETE FROM ' + mask_table)
             cursor.execute('DELETE FROM ' + block_table)
             connection.commit()
+
+        if tips:
+            gdal.PopErrorHandler()
+        else:
+            gdal.PushErrorHandler('CPLQuietErrorHandler')
 
         count = 0
 
         for batch_bounds in tqdm.tqdm(bounds):
             batch_bounds_size = len(batch_bounds)
-            print('batch bounds size: {}'.format(batch_bounds_size))
+            if tips:
+                print('batch bounds size: {}'.format(batch_bounds_size))
 
             if batch_bounds_size < inference_config.BATCH_SIZE:
                 batch_bounds = np.concatenate((batch_bounds, batch_bounds[0: 1] *
@@ -156,20 +171,26 @@ def detect(rs_image_path, class_names,
                 pre_masks = []
                 get_masks('{}-{}'.format(row - bound_offset_row, column - bound_offset_column),
                           pre_masks,
-                          cursor, mask_table)
+                          cursor,
+                          mask_table,
+                          tips)
                 get_masks('{}-{}'.format(row, column - bound_offset_column),
                           pre_masks,
                           cursor,
-                          mask_table)
+                          mask_table,
+                          tips)
                 get_masks('{}-{}'.format(row - bound_offset_row, column),
                           pre_masks,
                           cursor,
-                          mask_table)
+                          mask_table,
+                          tips)
                 get_masks('{}-{}'.format(row - bound_offset_row, column + bound_offset_column),
                           pre_masks,
                           cursor,
-                          mask_table)
-                print('find {} previous mask and box'.format(len(pre_masks)))
+                          mask_table,
+                          tips)
+                if tips:
+                    print('find {} previous mask and box'.format(len(pre_masks)))
 
                 transform = dataset.get_transform(row, column)
 
@@ -203,7 +224,7 @@ def detect(rs_image_path, class_names,
                     except StopIteration:
                         pass
 
-                    spatial_mask = ensure_geometry(spatial_mask)
+                    spatial_mask = ensure_geometry(spatial_mask, tips)
 
                     mask_expand_count = 0
 
@@ -224,16 +245,17 @@ def detect(rs_image_path, class_names,
                                 continue
 
                             spatial_mask = pre_mask.Union(spatial_mask)
-                            spatial_mask = ensure_geometry(spatial_mask)
+                            spatial_mask = ensure_geometry(spatial_mask, tips)
 
                             spatial_box = pre_box.Union(spatial_box)
-                            spatial_box = ensure_geometry(spatial_box)
+                            spatial_box = ensure_geometry(spatial_box, tips)
 
                             mask_expand_count = mask_expand_count + 1
 
                             cursor.execute('DELETE FROM ' + mask_table + ' WHERE id = %s', [pre_id])
                             connection.commit()
-                            print(colored('delete previous mask and box at {}'.format(pre_id), 'yellow'))
+                            if tips:
+                                print(colored('delete previous mask and box at {}'.format(pre_id), 'yellow'))
 
                             remove_pre_mask_indices.append(pre_mask_index)
 
@@ -249,7 +271,7 @@ def detect(rs_image_path, class_names,
                     if spatial_box.GetGeometryType() == ogr.wkbPolygon:
                         spatial_box = ogr.ForceToMultiPolygon(spatial_box)
 
-                    if not spatial_mask.IsValid():
+                    if not spatial_mask.IsValid() and tips:
                         print(colored('WARNING: mask at {} is not valid'.format(count), 'red'))
 
                     cursor.execute('INSERT INTO ' + mask_table +
@@ -265,7 +287,8 @@ def detect(rs_image_path, class_names,
                                     '{}-{}'.format(row, column),
                                     mask_expand_count])
                     connection.commit()
-                    print(colored('insert mask and box at {}'.format(count), 'green'))
+                    if tips:
+                        print(colored('insert mask and box at {}'.format(count), 'green'))
 
                     pre_masks.append((spatial_mask, spatial_box, count))
 
@@ -285,10 +308,11 @@ def detect(rs_image_path, class_names,
 
                 connection.commit()
 
-                print('bound index: {}, row: {}, column: {} finished'.format(index, row, column))
-                print('----------------------------------')
+                if tips:
+                    print('bound index: {}, row: {}, column: {} finished'.format(index, row, column))
+                    print('----------------------------------')
 
         cursor.close()
         connection.close()
 
-    print('mission completed')
+    print('task completed')
