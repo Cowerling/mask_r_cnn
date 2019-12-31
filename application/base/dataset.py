@@ -19,6 +19,7 @@ class GDALDataset(object):
         self.row_count = self.data_source.height
         self.column_count = self.data_source.width
         self.epsg = self.data_source.crs.to_epsg()
+        self.METER_TO_DEGREE = 0.0000094
 
     def generate_bounds(self, size, buffer, batch_size, extent=None):
         size_row = size[0]
@@ -81,13 +82,19 @@ class GDALDataset(object):
 
     def get_transform(self, row, column):
         x_top_left, y_top_left = self.data_source.xy(row, column)
-        x_top_left -= 0.15 / 2
-        y_top_left += 0.15 / 2
+        x_top_left -= math.fabs(self.data_source.transform[0]) / 2
+        y_top_left += math.fabs(self.data_source.transform[4]) / 2
 
         return rasterio.transform.from_origin(x_top_left,
                                               y_top_left,
                                               math.fabs(self.data_source.transform[0]),
                                               math.fabs(self.data_source.transform[4]))
+
+    def revise_buffer(self, buffer):
+        if self.data_source.crs.is_geographic:
+            return buffer[0] * self.METER_TO_DEGREE, buffer[1] * self.METER_TO_DEGREE
+        else:
+            return buffer
 
     def __enter__(self):
         return self

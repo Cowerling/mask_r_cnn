@@ -89,7 +89,7 @@ def detect(rs_image_path, class_names,
 
     with GDALDataset(rs_image_path) as dataset:
         bounds, bound_size_buffer = dataset.generate_bounds(size=bound_size,
-                                                            buffer=bound_buffer,
+                                                            buffer=dataset.revise_buffer(bound_buffer),
                                                             batch_size=inference_config.BATCH_SIZE,
                                                             extent=extent)
         bound_offset_row = bound_size_buffer[0] - bound_size_buffer[2]
