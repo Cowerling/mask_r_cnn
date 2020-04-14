@@ -10,10 +10,9 @@ from termcolor import colored
 import matplotlib.pyplot as plt
 import keras
 
+from application.base.dataset import GDALDataset
 from mrcnn import config
 from mrcnn import models
-
-from application.base.dataset import GDALDataset
 
 
 def get_masks(block_id, mask_list, cursor, mask_table, tips):
