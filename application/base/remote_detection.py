@@ -1,6 +1,6 @@
 import json
-# from threading import Thread
-import multiprocessing
+from threading import Thread
+# import multiprocessing
 import uuid
 import psycopg2
 import time
@@ -95,10 +95,10 @@ class DetectHandle(object):
 
         job_id = ''.join(str(uuid.uuid4()).split('-'))
 
-        # thread = Thread(target=self.process, args=(job_id, parameter,))
-        # thread.start()
-        process = multiprocessing.Process(target=self.process, args=(job_id, parameter,))
-        process.start()
+        thread = Thread(target=self.process, args=(job_id, parameter,))
+        thread.start()
+        # process = multiprocessing.Process(target=self.process, args=(job_id, parameter,))
+        # process.start()
 
         return json.dumps({'job_start': True, 'job_id': job_id})
 

@@ -27,7 +27,7 @@ class TCPServer(object):
                     print('receive parameter [{}] from {}'.format(parameter, client_address))
 
                     result = self.handle.work(parameter)
-                    
+
                     client_socket.send(result.encode('utf-8'))
                 else:
                     print('client {} is not connected'.format(client_address))
